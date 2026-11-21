@@ -1,25 +1,17 @@
-# ResourceReleaseBinding: runs the orders-db Resource in `development` (first environment of the pipeline).
-#
-# Development only, on purpose: production cells cannot run the CloudNativePG pods yet (koorikla/platform#327), and
-# staging/production ReleaseBindings pin a ComponentRelease cut before this database existed, so they do not wait for
-# it. Before promoting a ComponentRelease that depends on orders-db, add orders-db-<env>.yaml for that environment
-# (production: highAvailability: true and backup.enabled: true, platform policy).
-#
-# spec.resourceRelease is not set here: the platform keeps the pin on orders-db's latest release (koorikla/platform
-# docs/promotion.md "Resources"), because of the annotation below. A production binding pins it explicitly instead.
+# orders-db in development only; add orders-db-<env>.yaml before promoting a release that uses it (README "Files").
 apiVersion: openchoreo.dev/v1alpha1
 kind: ResourceReleaseBinding
 metadata:
   name: orders-db-development
   annotations:
-    argocd.argoproj.io/sync-wave: "1" # after the Resource: the platform's admission check reads it
-    platform.koorikla.io/resource-release: latest # the platform's auto-build pass pins orders-db's latest release
+    argocd.argoproj.io/sync-wave: "1" # after the Resource
+    platform.koorikla.io/resource-release: latest # the platform keeps it on orders-db's latest release
 spec:
   owner:
     projectName: demo
     resourceName: orders-db
   environment: development
-  retainPolicy: Delete # development data is disposable; unbinding deletes the database
+  retainPolicy: Delete # disposable development data
   resourceTypeEnvironmentConfigs:
     size: S
     storageGiB: 10

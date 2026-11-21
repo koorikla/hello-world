@@ -1,93 +1,21 @@
+# PR checks from the platform: go vet/lint/test, govulncheck, CodeQL, OpenChoreo manifests. The image is built,
+# signed and deployed by the platform (deploy/openchoreo/component.yaml spec.workflow), not here.
 name: ci
-
 on:
-  workflow_dispatch:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
-    paths-ignore:
-      - 'deploy/**'
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 permissions:
   contents: read
-
 jobs:
-  validate-manifests:
-    name: Validate OpenChoreo manifests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
-      - name: Validate OpenChoreo manifests
-        run: uv run --with pyyaml --with jsonschema python3 hack/validate-manifests.py
-
-  # Default: checks only (fast PR feedback); the image is built, signed and handed to GitOps by the OpenChoreo workflow
-  # plane (deploy/openchoreo/component.yaml spec.workflow). Optional path: repository variable
-  # IMAGE_BUILDER=github-actions builds/pushes to GHCR here and lets `bump` commit the image ref.
-  go:
-    needs: validate-manifests
-    uses: koorikla/platform/.github/workflows/app-go.yaml@3311f541a8eab72a2649b6f1eda4fe05efa3142e # ci-v1.0.0
+  checks:
+    uses: koorikla/platform/.github/workflows/app-go.yaml@dbc84fdac05465879a03165ca883f2170a50e508 # koorikla/platform#366 (ci-v1.2.0 once released)
     with:
-      build_container: ${{ vars.IMAGE_BUILDER == 'github-actions' }}
+      build_container: false
     permissions:
       contents: read
       actions: read
-      packages: write
-      id-token: write
-      attestations: write
       security-events: write
-
-  bump:
-    needs: go
-    if: vars.IMAGE_BUILDER == 'github-actions' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-
-      - name: Bump OpenChoreo Workload
-        env:
-          # <image>:<short sha>@sha256:<index digest>: production admits only digest references
-          # (koorikla/platform Kyverno requireDigest, koorikla/platform#16); the tag keeps it readable.
-          # app-go.yaml `image_digest_ref` is <repo>@sha256:... without the tag.
-          NEW_IMAGE: ${{ needs.go.outputs.image }}@${{ needs.go.outputs.digest }}
-          NEW_COMMIT: ${{ github.sha }}
-        run: |
-          python3 - <<'PY'
-          import os, pathlib, re
-          assert re.fullmatch(r'[^\s@]+:[^\s@]+@sha256:[0-9a-f]{64}', os.environ['NEW_IMAGE']), os.environ['NEW_IMAGE']
-          p = pathlib.Path('deploy/openchoreo/workload.yaml')
-          text = p.read_text()
-          text, n_commit = re.subn(r'^(\s*commit:\s*).*$', rf'\g<1>"{os.environ["NEW_COMMIT"]}"', text, count=1, flags=re.M)
-          text, n_image = re.subn(r'^(\s*image:\s*).*$', rf'\g<1>{os.environ["NEW_IMAGE"]}', text, count=1, flags=re.M)
-          assert n_commit == 1 and n_image == 1, (n_commit, n_image)
-          p.write_text(text)
-          PY
-
-      - uses: astral-sh/setup-uv@v10.3.3
-
-      - name: Validate bumped manifests
-        run: uv run --with pyyaml --with jsonschema python3 hack/validate-manifests.py
-
-      - name: Commit and push Workload bump
-        env:
-          SHORT_SHA: ${{ needs.go.outputs.short_sha }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if git diff --quiet deploy/openchoreo/workload.yaml; then
-            echo 'No workload changes to commit'
-            exit 0
-          fi
-          git add deploy/openchoreo/workload.yaml
-          git commit -m "chore(deploy): bump hello-world image to ${SHORT_SHA} [skip ci]"
-          git pull --rebase origin main
-          git push origin main
+      packages: write     # these three are unused with build_container: false, but GitHub checks nested jobs'
+      id-token: write     # permissions statically, so the caller must grant them
+      attestations: write

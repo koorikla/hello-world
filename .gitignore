@@ -1,7 +1,2 @@
 # Compiled binaries
 /hello-world
-
-# Python tooling
-.venv/
-__pycache__/
-*.pyc

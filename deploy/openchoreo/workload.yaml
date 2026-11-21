@@ -1,7 +1,4 @@
-# OpenChoreo Workload: the runtime contract (image, endpoints, config).
-# spec.container.image (<image>:<tag>@sha256:<digest>) and spec.source.commit are written by the build: the OpenChoreo
-# workflow (component.yaml spec.workflow, step gitops) or, if IMAGE_BUILDER=github-actions,
-# .github/workflows/ci.yaml job `bump`. Do not edit them by hand.
+# The OpenChoreo Workload: image, config, endpoint, database. The build writes image and commit.
 apiVersion: openchoreo.dev/v1alpha1
 kind: Workload
 metadata:
@@ -19,27 +16,19 @@ spec:
     env:
       - key: GREETING
         value: hello
-      # From OpenBao via the SecretReference in greeting-secret.yaml (same name); no value in git.
       - key: GREETING_SECRET
         valueFrom:
           secretKeyRef:
-            name: hello-world-greeting
+            name: hello-world-greeting # greeting-secret.yaml (value in OpenBao)
             key: greeting
   endpoints:
     http:
       type: HTTP
       port: 8080
-      # external = routed through the environment's external gateway; requires
-      # gateway.ingress.external on the Environment/DataPlane.
       visibility: [external]
   dependencies:
     resources:
-      # The orders-db Resource (orders-db.yaml). In each environment OpenChoreo resolves its outputs from that
-      # environment's ResourceReleaseBinding: host/port/database as plain values, username/password/uri as
-      # secretKeyRefs to the database's Secret <xr>-app in the cell namespace (the values never leave the data plane).
-      # The names are libpq's, so any Postgres client finds the database without configuration. GET /db uses them.
-      # A ComponentRelease with this dependency waits in every environment without an orders-db binding.
-      - ref: orders-db
+      - ref: orders-db # orders-db.yaml; libpq variable names, GET /db uses them
         envBindings:
           host: PGHOST
           port: PGPORT

@@ -1,10 +1,4 @@
-# ReleaseBinding for `development` (first environment of the pipeline).
-#
-# spec.releaseName is intentionally NOT set here: with Component.spec.autoDeploy
-# the OpenChoreo controller owns it and moves it to the latest ComponentRelease
-# on every Workload change. Leaving the field out of Git keeps Argo CD from
-# fighting the controller (Argo CD ignores `/spec/releaseName`). The name must
-# stay `<component>-<env>` - it is the name the controller would create.
+# development: no releaseName, OpenChoreo moves it to every new build (Component autoDeploy).
 apiVersion: openchoreo.dev/v1alpha1
 kind: ReleaseBinding
 metadata:

@@ -23,12 +23,6 @@ mise exec -- go test -race -v ./...
 mise exec -- go run .
 ```
 
-Validate the OpenChoreo 1.3.3 manifests against the vendored CRD schemas:
-
-```bash
-uv run --with pyyaml --with jsonschema python3 hack/validate-manifests.py
-```
-
 Build the container image locally:
 
 ```bash
@@ -58,48 +52,24 @@ a `checks.image` override must be `image@sha256:<digest>`:
    repository only (no personal access token; koorikla/platform docs/build-plane.md "Git credentials"), so GitHub
    shows it as Verified.
 
-**GitHub Actions** (`.github/workflows/ci.yaml`, reusable
-[`koorikla/platform/.github/workflows/app-go.yaml`](https://github.com/koorikla/platform/blob/main/.github/workflows/app-go.yaml)) always validates the manifests and runs
-the Go checks (CodeQL included). With repository variable `IMAGE_BUILDER=github-actions` it is the build path instead:
-multi-arch image to `ghcr.io/koorikla/hello-world:<short-sha>`, Trivy, SBOM, GitHub SLSA provenance, cosign keyless
-signature, and job `bump` commits the image ref. Use one path at a time (both write `workload.yaml`): set
-`autoBuild: false` in `deploy/openchoreo/component.yaml` when switching to `IMAGE_BUILDER=github-actions`. The reusable workflow is `koorikla/platform/.github/workflows/app-go.yaml`, released as `ci-vX.Y.Z`.
+**GitHub Actions** (`.github/workflows/ci.yaml`) runs pull-request checks only: one call to the platform's reusable
+[`app-go.yaml`](https://github.com/koorikla/platform/blob/main/.github/workflows/app-go.yaml) with
+`build_container: false` (go vet, golangci-lint, `go test -race`, govulncheck, CodeQL, and the OpenChoreo manifests in
+`deploy/openchoreo/` against the schemas of the OpenChoreo version the platform runs). This repository contains no CI
+code. Building and signing on GitHub Actions instead is a platform option for other apps (koorikla/platform
+docs/build-plane.md); this example uses one build path.
 
-Verify a platform-built image (default path; platform key, no public Rekor entry by default):
-
-```sh
-# cosign.pub of the platform (public): from the platform operator, or on the mgmt cluster
-kubectl -n platform-secrets get secret cosign-platform -o jsonpath='{.data.cosign\.pub}' | base64 -d > cosign.pub
-# Harbor uses the platform's registry CA: trust it for cosign (SSL_CERT_FILE) or `docker login` first
-cosign verify --key cosign.pub --insecure-ignore-tlog=true \
-  harbor.openchoreo.localhost:9443/apps/demo/hello-world@sha256:<digest>
-cosign verify-attestation --key cosign.pub --insecure-ignore-tlog=true --type https://spdx.dev/Document/v2.3 \
-  harbor.openchoreo.localhost:9443/apps/demo/hello-world@sha256:<digest>
-```
-
-`--insecure-ignore-tlog=true` because the platform signs without uploading to the public Rekor log (installation
-switch `buildWorkflows.signing.transparencyLog`); drop it when that switch is on. The digest is the one in
-`deploy/openchoreo/workload.yaml`.
-
-Verify a GitHub-built image (keyless):
-
-```sh
-cosign verify ghcr.io/koorikla/hello-world:<short-sha> \
-  --certificate-identity-regexp '^https://github.com/koorikla/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-## Deployment & Promotion
+## Files
 
 `deploy/openchoreo/` holds the OpenChoreo 1.3.3 developer manifests for project `demo`:
 
 - `component.yaml`: `Component/hello-world` referencing `ClusterComponentType` `deployment/service` with `autoDeploy: true`.
-- `workload.yaml`: `Workload/hello-world-workload` defining the GHCR image, `GREETING` env, `GREETING_SECRET` (from the SecretReference below), and external `HTTP` endpoint on port `8080`.
-- `greeting-secret.yaml`: `SecretReference/hello-world-greeting`, a pointer to key `hello-world` / property `greeting` in the project's OpenBao mount `kv-tenant-demo`; the value is never in git. How to write, consume and rotate it: koorikla/platform docs/openchoreo.md "Application secrets (developer view)". `hack/validate-manifests.py` fails if a `secretKeyRef` names a missing SecretReference or key.
+- `workload.yaml`: `Workload/hello-world-workload` defining the image (written by the build), `GREETING` env, `GREETING_SECRET` (from the SecretReference below), and external `HTTP` endpoint on port `8080`.
+- `greeting-secret.yaml`: `SecretReference/hello-world-greeting`, a pointer to key `hello-world` / property `greeting` in the project's OpenBao mount `kv-tenant-demo`; the value is never in git. How to write, consume and rotate it: koorikla/platform docs/openchoreo.md "Application secrets (developer view)". CI fails if a `secretKeyRef` names a missing SecretReference or key.
 - `release-bindings/development.yaml`: `ReleaseBinding/hello-world-development` (omits `spec.releaseName`; `autoDeploy: true` causes the OpenChoreo controller to cut an immutable `ComponentRelease` named `hello-world-<hash>` and update this binding automatically, while Argo CD ignores `/spec/releaseName`).
 - `release-bindings/staging.yaml` & `production.yaml`: `ReleaseBinding` objects for `staging` (on `dev1`) and `production` (on `prod1`), dormant until promoted.
 - `orders-db.yaml`: `Resource/orders-db` of the platform's `ClusterResourceType` `postgresql` (koorikla/platform docs/data-services.md "PostgreSQL from OpenChoreo"). `workload.yaml` `dependencies.resources` wires its outputs into the container: `PGHOST`/`PGPORT`/`PGDATABASE` as values, `PGUSER`/`PGPASSWORD`/`DATABASE_URL` as `secretKeyRef`s to the database's Secret `<xr>-app` in the cell namespace (never in git, never on the control plane).
-- `release-bindings/orders-db-development.yaml`: `ResourceReleaseBinding/orders-db-development` runs the database in `development` only. It carries the annotation `platform.koorikla.io/resource-release: latest` and no `spec.resourceRelease`: OpenChoreo 1.3.3 never sets that pin itself, so the platform's auto-build pass keeps it on `orders-db`'s latest release on every pass, and a parameter or platform type change rolls into development by itself (koorikla/platform docs/promotion.md "Resources"). PR previews get their own `orders-db` binding from the platform, nothing here. A production binding must instead pin `spec.resourceRelease: orders-db-<hash>` explicitly (copied from `kubectl get resource orders-db -o jsonpath='{.status.latestRelease.name}'`, like a `ComponentRelease` name); the platform never moves production pins. There is no staging or production binding yet (production cells cannot run CloudNativePG before koorikla/platform#327): a `ComponentRelease` with this dependency waits (`ResourceDependenciesPending`) in any environment without an `orders-db-<env>` binding, so add `orders-db-staging.yaml` / `orders-db-production.yaml` (production: `highAvailability: true`, `backup.enabled: true`) before promoting it. `hack/validate-manifests.py` fails if a dependency names a missing Resource or one without a development binding, if a non-production binding has neither the `latest` annotation nor a `<resource>-<hash>` pin, or if a production binding uses the annotation or lacks an explicit pin.
+- `release-bindings/orders-db-development.yaml`: `ResourceReleaseBinding/orders-db-development` runs the database in `development` only. It carries the annotation `platform.koorikla.io/resource-release: latest` and no `spec.resourceRelease`: OpenChoreo 1.3.3 never sets that pin itself, so the platform's auto-build pass keeps it on `orders-db`'s latest release on every pass, and a parameter or platform type change rolls into development by itself (koorikla/platform docs/promotion.md "Resources"). PR previews get their own `orders-db` binding from the platform, nothing here. A production binding must instead pin `spec.resourceRelease: orders-db-<hash>` explicitly (copied from `kubectl get resource orders-db -o jsonpath='{.status.latestRelease.name}'`, like a `ComponentRelease` name); the platform never moves production pins. There is no staging or production binding yet (production cells cannot run CloudNativePG before koorikla/platform#327): a `ComponentRelease` with this dependency waits (`ResourceDependenciesPending`) in any environment without an `orders-db-<env>` binding, so add `orders-db-staging.yaml` / `orders-db-production.yaml` (production: `highAvailability: true`, `backup.enabled: true`) before promoting it. CI fails if a dependency names a missing Resource or one without a development binding, if a non-production binding has neither the `latest` annotation nor a `<resource>-<hash>` pin, or if a production binding uses the annotation or lacks an explicit pin.
 
 ### Promotion
 

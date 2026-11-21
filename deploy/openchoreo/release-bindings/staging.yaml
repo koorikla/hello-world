@@ -1,8 +1,4 @@
-# ReleaseBinding for `staging`.
-#
-# PROMOTION = a PR that sets spec.releaseName to the ComponentRelease currently
-# running in development (see README "Promotion"). Until it is set, this
-# binding stays pending (ReleaseSynced=False, ComponentReleaseNotFound).
+# staging: promote = a PR setting releaseName to the ComponentRelease running in development (README "Promotion").
 apiVersion: openchoreo.dev/v1alpha1
 kind: ReleaseBinding
 metadata:
@@ -13,17 +9,11 @@ spec:
     componentName: hello-world
   environment: staging
   releaseName: hello-world-77ff9dc697
-  # Two replicas so the platform's PodDisruptionBudget (staging + production) keeps one pod through a node drain;
-  # the KEDA floor matches (production denies autoscalers below 2, staging audits).
-  componentTypeEnvironmentConfigs:
+  componentTypeEnvironmentConfigs: # platform policy: replicas >= 2 and requests set (enforced in production)
     replicas: 2
     resources:
-      requests:
-        cpu: 100m
-        memory: 64Mi
-      limits:
-        cpu: 500m
-        memory: 128Mi
+      requests: { cpu: 100m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 128Mi }
   traitEnvironmentConfigs:
     scaler:
       minReplicas: 2

@@ -1,8 +1,4 @@
-# ReleaseBinding for `production`.
-#
-# PROMOTION = a PR that sets spec.releaseName to the ComponentRelease currently
-# running in staging (see README "Promotion"). Until it is set, this binding
-# stays pending (ReleaseSynced=False, ComponentReleaseNotFound).
+# production: promote = a PR setting releaseName to the ComponentRelease running in staging (README "Promotion").
 apiVersion: openchoreo.dev/v1alpha1
 kind: ReleaseBinding
 metadata:
@@ -13,17 +9,11 @@ spec:
     componentName: hello-world
   environment: production
   releaseName: hello-world-77ff9dc697
-  # replicas >= 2, requests and the KEDA floor >= 2 are required in production (platform policy
-  # openchoreo-workload-resilience-enforce); the PodDisruptionBudget follows from replicas >= 2.
-  componentTypeEnvironmentConfigs:
+  componentTypeEnvironmentConfigs: # platform policy: replicas >= 2 and requests set (enforced in production)
     replicas: 2
     resources:
-      requests:
-        cpu: 100m
-        memory: 64Mi
-      limits:
-        cpu: 500m
-        memory: 128Mi
+      requests: { cpu: 100m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 128Mi }
   traitEnvironmentConfigs:
     scaler:
       minReplicas: 2

@@ -1,7 +1,4 @@
-# OpenChoreo Component: the developer-facing definition of hello-world.
-#
-# No metadata.namespace on purpose: the platform's Argo CD Application sets the
-# destination namespace (the OpenChoreo org namespace, `default`).
+# The OpenChoreo Component: what hello-world is and how it is built (README "Files").
 apiVersion: openchoreo.dev/v1alpha1
 kind: Component
 metadata:
@@ -9,84 +6,39 @@ metadata:
   annotations:
     openchoreo.dev/display-name: Hello World
     openchoreo.dev/description: Tiny Go HTTP service used to exercise the platform end to end
-    # PR preview environments (koorikla/platform docs/preview-environments.md): every open pull request gets its own
-    # OpenChoreo environment pr-<n>-hello-world running the in-cluster build of the PR head; the URL appears on the PR
-    # as commit status openchoreo/preview. Removed when the PR closes or after the platform TTL. Remove to opt out.
-    platform.koorikla.io/preview-environments: enabled
+    platform.koorikla.io/preview-environments: enabled # one environment per open pull request
 spec:
   owner:
-    projectName: demo # immutable; Project is created by the platform (tenants/demo.yaml)
+    projectName: demo
   componentType:
-    # Upstream 1.3.3 default ClusterComponentType `service` (workloadType deployment).
-    # Immutable after creation.
     kind: ClusterComponentType
     name: deployment/service
-  # autoDeploy: true -> on every Component/Workload change the OpenChoreo
-  # controller cuts an immutable ComponentRelease (hello-world-<hash>) from the
-  # *platform's* ClusterComponentType and points the first pipeline environment's
-  # ReleaseBinding (development) at it. CI only bumps the image in workload.yaml,
-  # so `main` is continuously deployed to development. Staging and production are
-  # pinned in Git (release-bindings/*.yaml) and only move via a reviewed PR.
-  autoDeploy: true
-  # Build: OpenChoreo workflow plane (default build path, koorikla/platform docs/build-plane.md). ClusterWorkflow `go`
-  # runs the platform's ci/scripts/go/check.sh + scans, builds a multi-arch image with rootless BuildKit, pushes it to the
-  # platform registry (Harbor apps/demo/hello-world), signs and attests it, then commits the image ref into
-  # workload.yaml - Argo CD deploys that commit. Trigger: every new commit on main (autoBuild: the platform's auto-build
-  # trigger, one WorkflowRun hello-world-<sha12> per commit; poll locally, GitHub App webhook in cloud installations),
-  # or Backstage "Build". GitHub Actions (.github/workflows/ci.yaml) is the optional alternative: set repository
-  # variable IMAGE_BUILDER=github-actions AND autoBuild: false to let it build and bump instead.
-  autoBuild: true
-  # Event-driven autoscaling: platform ClusterTrait keda-scaler (koorikla/platform docs/data-services.md "KEDA and
-  # OpenChoreo workloads"). Renders a KEDA ScaledObject next to the Deployment and removes spec.replicas from it, so
-  # componentTypeEnvironmentConfigs.replicas no longer applies (KEDA's HPA owns the replica count). Needs addon keda
-  # on the environment's data plane (dev1 runs it). Per-environment bounds: release-bindings/*.yaml traitEnvironmentConfigs.
+  autoDeploy: true # each new build goes to development; staging and production move by PR (release-bindings/)
+  autoBuild: true  # the platform builds every commit on main with spec.workflow
   traits:
-    # Readiness gates traffic, liveness restarts a wedged process, startup protects slow boots from liveness.
-    # Production requires the readiness probe (platform policy openchoreo-workload-resilience-enforce). Spread, PDB,
-    # graceful shutdown and priority come from the component type itself (platform docs/openchoreo.md
-    # "Resilience defaults"): nothing to add here.
     - kind: ClusterTrait
-      name: health-probes
+      name: health-probes # production requires the readiness probe
       instanceName: probes
       parameters:
-        readiness:
-          enabled: true
-          handler: { httpGet: { port: 8080, path: /healthz } }
-          periodSeconds: 5
-        liveness:
-          enabled: true
-          handler: { httpGet: { port: 8080, path: /healthz } }
-          periodSeconds: 10
-          failureThreshold: 3
-        startup:
-          enabled: true
-          handler: { httpGet: { port: 8080, path: /healthz } }
-          periodSeconds: 2
-          failureThreshold: 15
+        readiness: { enabled: true, handler: { httpGet: { port: 8080, path: /healthz } }, periodSeconds: 5 }
+        liveness: { enabled: true, handler: { httpGet: { port: 8080, path: /healthz } }, periodSeconds: 10, failureThreshold: 3 }
+        startup: { enabled: true, handler: { httpGet: { port: 8080, path: /healthz } }, periodSeconds: 2, failureThreshold: 15 }
     - kind: ClusterTrait
       name: keda-scaler
       instanceName: scaler
       parameters:
         minReplicas: 1
         maxReplicas: 3
-        triggers:
-          # Live proof of #70: 2 replicas from minute 0 to 5 of every 20 (UTC), back to 1 after the HPA scale-down window (5 min).
+        triggers: # demo: 2 replicas from minute 0 to 5 of every 20 (UTC)
           - type: cron
-            metadata:
-              timezone: Etc/UTC
-              start: "*/20 * * * *"
-              end: "5-59/20 * * * *"
-              desiredReplicas: "2"
+            metadata: { timezone: Etc/UTC, start: "*/20 * * * *", end: "5-59/20 * * * *", desiredReplicas: "2" }
   workflow:
     kind: ClusterWorkflow
-    name: go
+    name: go # test, multi-arch image, scan, sign, then commit the image digest into workload.yaml
     parameters:
       repository:
         url: https://github.com/koorikla/hello-world.git
-        revision:
-          branch: main
+        revision: { branch: main }
         appPath: "."
-      docker:
-        context: "."
-        filePath: Dockerfile
-      platforms: linux/amd64,linux/arm64   # the Dockerfile cross-compiles: no emulation needed
+      docker: { context: ".", filePath: Dockerfile }
+      platforms: linux/amd64,linux/arm64
