@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
       - name: Validate OpenChoreo manifests
         run: uv run --with pyyaml --with jsonschema python3 hack/validate-manifests.py
 
@@ -72,7 +72,7 @@ jobs:
           p.write_text(text)
           PY
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Validate bumped manifests
         run: uv run --with pyyaml --with jsonschema python3 hack/validate-manifests.py
